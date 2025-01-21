@@ -12,6 +12,7 @@
     "axios": "^1.4.0",
     "concurrently": "^9.1.2",
     "cra-template": "1.2.0",
+    "dayjs": "^1.11.10",
     "express": "^4.21.2",
     "mdb-reader": "^2.2.6",
     "react": "^18.0.0",

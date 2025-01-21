@@ -1,47 +1,11 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Box, Typography, Paper, Grid, Snackbar } from '@mui/material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Box, Typography, Snackbar } from '@mui/material';
 import Header from './components/Header';
+import Dashboard from './components/Dashboard';
 import TabularView from './components/TabularView';
 import './App.css';
 import axios from 'axios';
-
-function Dashboard({ data, loading, temperatureColors }) {
-  return (
-    <Grid container spacing={3}>
-      {/* Temperature Graph */}
-      <Grid item xs={12}>
-        <Paper sx={{ p: 2, height: 400 }}>
-          <Typography variant="h6" gutterBottom>
-            Temperature Trends
-          </Typography>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={data}
-              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis label={{ value: 'Temperature', angle: -90, position: 'insideLeft' }} />
-              <Tooltip />
-              <Legend />
-              {Array.from({ length: 14 }, (_, i) => (
-                <Line
-                  key={`T${i + 1}`}
-                  type="monotone"
-                  dataKey={`T${i + 1}`}
-                  stroke={temperatureColors[i]}
-                  name={`Zone ${i + 1}`}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </Paper>
-      </Grid>
-    </Grid>
-  );
-}
 
 function App() {
   const [data, setData] = useState([]);
@@ -96,7 +60,7 @@ function App() {
           sx={{
             flexGrow: 1,
             p: 3,
-            pt: 10, // Increased top padding to account for AppBar
+            pt: 10,
             transition: (theme) =>
               theme.transitions.create('margin', {
                 easing: theme.transitions.easing.sharp,
