@@ -10,6 +10,11 @@ import {
   MenuItem,
   FormControl,
   Modal,
+  Chip,
+  TextField,
+  InputLabel,
+  OutlinedInput,
+  Stack,
 } from "@mui/material";
 import {
   LineChart,
@@ -21,14 +26,335 @@ import {
   Legend,
   ResponsiveContainer,
   Brush,
-  AreaChart,
-  Area,
+  ReferenceLine,
 } from "recharts";
 import ThermostatIcon from "@mui/icons-material/Thermostat";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import CloseIcon from "@mui/icons-material/Close";
-import { useState } from "react";
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { useState, useMemo } from "react";
+import dayjs from 'dayjs';
+import isBetween from 'dayjs/plugin/isBetween';
+import { Tag } from 'antd';
+import 'antd/dist/reset.css';
+import { DatePicker } from 'antd';
+import { Pagination } from 'antd';
+import DataVisualizations from './DataVisualizations';
+const { RangePicker } = DatePicker;
+dayjs.extend(isBetween);
+
+// Temperature range utility - match with TabularView
+export const getTemperatureRanges = (data) => {
+  const allTemps = [];
+  for (let i = 1; i <= 14; i++) {
+    const zoneTemps = data
+      .map(row => row[`T${i}`])
+      .filter(temp => temp != null && !isNaN(temp));
+    allTemps.push(...zoneTemps);
+  }
+
+  allTemps.sort((a, b) => a - b);
+  
+  const getPercentile = (arr, percentile) => {
+    const index = Math.ceil(arr.length * percentile) - 1;
+    return arr[index];
+  };
+
+  return {
+    min: Math.min(...allTemps),
+    max: Math.max(...allTemps),
+    q1: getPercentile(allTemps, 0.25),
+    q3: getPercentile(allTemps, 0.75),
+    median: getPercentile(allTemps, 0.5)
+  };
+};
+
+// Temperature color utility - match with TabularView
+export const getTemperatureColor = (value, ranges) => {
+  if (!ranges || value === null || value === undefined) return 'inherit';
+  if (value <= ranges.q1) return '#52c41a'; // green
+  if (value >= ranges.q3) return '#f5222d'; // red
+  return '#1890ff'; // blue
+};
+
+function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, temperatureStats }) {
+  const [selectedZones, setSelectedZones] = useState(Array.from({ length: 14 }, (_, i) => i + 1));
+  const [dateRange, setDateRange] = useState(null);
+  const [minThreshold, setMinThreshold] = useState('');
+  const [maxThreshold, setMaxThreshold] = useState('');
+
+  const handleZoneChange = (event) => {
+    const { value } = event.target;
+    setSelectedZones(value);
+  };
+
+  const handleDateRangeChange = (dates) => {
+    setDateRange(dates);
+    if (dates) {
+      onPageChange(1, pagination.pageSize, dates.map(date => date.format('YYYY-MM-DD')));
+    } else {
+      onPageChange(1, pagination.pageSize);
+    }
+  };
+
+  // Process data for the chart
+  const chartData = useMemo(() => {
+    return data.map(item => ({
+      ...item,
+      formattedDate: dayjs(item.date).format('DD/MM/YYYY'),
+      formattedTime: item.time
+    }));
+  }, [data]);
+
+  console.log('Chart data sample:', chartData[0]); // Debug log
+
+  // Function to render selected zones with limit
+  const renderSelectedZones = (selected) => {
+    const maxDisplay = 3;
+    const displayedZones = selected.slice(0, maxDisplay);
+    
+    return (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+        {displayedZones.map((value) => (
+          <Chip 
+            key={value} 
+            label={`Zone ${value}`} 
+            size="small"
+            sx={{ 
+              bgcolor: temperatureColors[value - 1],
+              color: '#fff',
+              '& .MuiChip-deleteIcon': {
+                color: '#fff',
+                '&:hover': {
+                  opacity: 0.7,
+                },
+              },
+            }}
+          />
+        ))}
+        {selected.length > maxDisplay && (
+          <Chip 
+            label={`+${selected.length - maxDisplay} more`} 
+            size="small"
+            sx={{ 
+              bgcolor: 'grey.300',
+              color: 'text.primary',
+            }}
+          />
+        )}
+      </Box>
+    );
+  };
+
+  // Custom legend renderer
+  const renderLegend = (props) => {
+    const { payload } = props;
+    
+    return (
+      <Box 
+        sx={{ 
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+          gap: 1,
+          width: '100%',
+          px: 2,
+          py: 1,
+        }}
+      >
+        {payload.map((entry, index) => (
+          <Box
+            key={`legend-${index}`}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              fontSize: '0.875rem',
+            }}
+          >
+            <Box
+              sx={{
+                width: 16,
+                height: 2,
+                backgroundColor: entry.color,
+                flexShrink: 0,
+              }}
+            />
+            <Typography variant="body2" noWrap>
+              {entry.value}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    );
+  };
+
+  return (
+    <Paper sx={{ p: 3, mb: 4 }}>
+      <Stack spacing={2} sx={{ mb: 3 }}>
+        {/* Controls layout */}
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+          {/* Zone Selection */}
+          <FormControl sx={{ width: '320px' }}>
+            <InputLabel>Zones</InputLabel>
+            <Select
+              multiple
+              value={selectedZones}
+              onChange={handleZoneChange}
+              input={<OutlinedInput label="Zones" />}
+              renderValue={renderSelectedZones}
+              size="small"
+            >
+              {Array.from({ length: 14 }, (_, i) => (
+                <MenuItem 
+                  key={i + 1} 
+                  value={i + 1}
+                  sx={{
+                    transition: 'all 0.2s',
+                    '&::after': {
+                      bgcolor: temperatureColors[i],
+                    },
+                    '&.Mui-selected': {
+                      bgcolor: '#52c41a20 !important',
+                      color: '#52c41a',
+                      fontWeight: 600,
+                      '&:hover': {
+                        bgcolor: '#52c41a30 !important',
+                      },
+                    },
+                    '&:hover': {
+                      bgcolor: 'rgba(0, 0, 0, 0.04)',
+                    },
+                  }}
+                >
+                  Zone {i + 1}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          {/* Date Range Picker */}
+          <RangePicker
+            format="DD/MM/YYYY"
+            value={dateRange}
+            onChange={handleDateRangeChange}
+            allowClear
+            style={{ width: '320px' }}
+            placeholder={['Start Date', 'End Date']}
+          />
+
+          {/* Threshold Controls */}
+          <Box sx={{ display: 'flex', gap: 2, width: '300px' }}>
+            <TextField
+              label="Min Threshold"
+              type="number"
+              size="small"
+              value={minThreshold}
+              onChange={(e) => setMinThreshold(e.target.value)}
+              fullWidth
+            />
+            <TextField
+              label="Max Threshold"
+              type="number"
+              size="small"
+              value={maxThreshold}
+              onChange={(e) => setMaxThreshold(e.target.value)}
+              fullWidth
+            />
+          </Box>
+        </Box>
+
+        {/* Temperature Range Legend */}
+        {temperatureStats && (
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <Typography variant="body2" color="text.secondary">
+              Temperature Ranges:
+            </Typography>
+            <Tag color="success">Low: ≤{temperatureStats.q1.toFixed(2)}°C</Tag>
+            <Tag color="processing">Normal: {temperatureStats.q1.toFixed(2)}-{temperatureStats.q3.toFixed(2)}°C</Tag>
+            <Tag color="error">High: ≥{temperatureStats.q3.toFixed(2)}°C</Tag>
+          </Box>
+        )}
+      </Stack>
+
+      {/* Chart */}
+      <Box sx={{ height: 400, position: 'relative' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart 
+            data={chartData} 
+            margin={{ top: 5, right: 30, left: 20, bottom: 45 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis 
+              dataKey="formattedDate" 
+              tick={{ fontSize: 11 }}
+              angle={-45}
+              textAnchor="end"
+              height={60}
+              interval="preserveStartEnd"
+              tickMargin={15}
+            />
+            <YAxis 
+              label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft' }}
+              domain={['auto', 'auto']}
+            />
+            <Tooltip 
+              labelFormatter={(label) => label}
+              formatter={(value) => [value ? `${value.toFixed(2)}°C` : 'N/A']}
+              contentStyle={{
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                border: '1px solid #ccc',
+                borderRadius: '4px'
+              }}
+            />
+            <Legend content={renderLegend} />
+            {minThreshold && (
+              <ReferenceLine 
+                y={Number(minThreshold)} 
+                stroke="#52c41a"
+                strokeDasharray="3 3" 
+                label={{ value: 'Min Threshold', position: 'insideLeft' }} 
+              />
+            )}
+            {maxThreshold && (
+              <ReferenceLine 
+                y={Number(maxThreshold)} 
+                stroke="#f5222d"
+                strokeDasharray="3 3" 
+                label={{ value: 'Max Threshold', position: 'insideRight' }} 
+              />
+            )}
+            {selectedZones.map((zoneNum) => (
+              <Line
+                key={`T${zoneNum}`}
+                type="monotone"
+                dataKey={`T${zoneNum}`}
+                stroke={temperatureColors[zoneNum - 1]}
+                name={`Zone ${zoneNum}`}
+                dot={false}
+                activeDot={{ r: 6 }}
+                connectNulls
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </Box>
+
+      {/* Pagination */}
+      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+        <Pagination
+          current={pagination.page}
+          total={pagination.total}
+          pageSize={pagination.pageSize}
+          onChange={(page, pageSize) => onPageChange(page, pageSize)}
+          showSizeChanger
+          showQuickJumper
+          showTotal={(total) => `Total ${total} items`}
+        />
+      </Box>
+    </Paper>
+  );
+}
 
 function DetailedGraphView({ open, onClose, zoneNumber, data, color }) {
   const [timeRange, setTimeRange] = useState("all");
@@ -152,7 +478,7 @@ function DetailedGraphView({ open, onClose, zoneNumber, data, color }) {
   );
 }
 
-function ZoneCard({ zoneNumber, data, color }) {
+function ZoneCard({ zoneNumber, data, color, temperatureStats }) {
   const [isFlipped, setIsFlipped] = useState(false);
   const [showDetailedView, setShowDetailedView] = useState(false);
 
@@ -362,57 +688,50 @@ function ZoneCard({ zoneNumber, data, color }) {
   );
 }
 
-function Dashboard({ data, loading, temperatureColors }) {
+function Dashboard({ data, loading, temperatureColors, pagination, onPageChange, temperatureStats }) {
+  if (loading) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography>Loading temperature data...</Typography>
+      </Box>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography>No temperature data available</Typography>
+      </Box>
+    );
+  }
+
   return (
-    <Box>
-      {/* Zone Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
+    <Box sx={{ p: 3 }}>
+      <ConfigurableGraph 
+        data={data} 
+        temperatureColors={temperatureColors}
+        pagination={pagination}
+        onPageChange={onPageChange}
+        temperatureStats={temperatureStats}
+      />
+
+      <DataVisualizations 
+        data={data}
+        temperatureStats={temperatureStats}
+        temperatureColors={temperatureColors}
+      />
+
+      <Grid container spacing={3}>
         {Array.from({ length: 14 }, (_, i) => (
           <Grid item xs={12} sm={6} md={4} lg={3} key={i}>
-            <ZoneStatCard
+            <ZoneCard
               zoneNumber={i + 1}
               data={data}
               color={temperatureColors[i]}
+              temperatureStats={temperatureStats}
             />
           </Grid>
         ))}
-      </Grid>
-
-      {/* Temperature Graph */}
-      <Grid container spacing={3}>
-        <Grid item xs={12}>
-          <Paper sx={{ p: 2, height: 500 }}>
-            <Typography variant="h6" gutterBottom>
-              Temperature Trends
-            </Typography>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={data}
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="time" />
-                <YAxis label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft' }} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)' }}
-                  labelStyle={{ fontWeight: 'bold' }}
-                />
-                <Legend />
-                {Array.from({ length: 14 }, (_, i) => (
-                  <Line
-                    key={`T${i + 1}`}
-                    type="monotone"
-                    dataKey={`T${i + 1}`}
-                    stroke={temperatureColors[i]}
-                    name={`Zone ${i + 1}`}
-                    dot={false}
-                    activeDot={{ r: 6 }}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </Paper>
-        </Grid>
       </Grid>
     </Box>
   );

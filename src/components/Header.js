@@ -22,7 +22,7 @@ import TableChartIcon from '@mui/icons-material/TableChart';
 import SettingsIcon from '@mui/icons-material/Settings';
 
 const drawerWidth = 240;
-const miniDrawerWidth = 100;
+const miniDrawerWidth = 80;
 
 const DrawerHeader = styled('div')(({ theme }) => ({
   display: 'flex',
@@ -139,26 +139,10 @@ function Header({ onRefresh, refreshing }) {
             width: drawerOpen ? drawerWidth : miniDrawerWidth,
             boxSizing: 'border-box',
             overflowX: 'hidden',
-            transition: theme =>
-              theme.transitions.create('width', {
-                easing: theme.transitions.easing.sharp,
-                duration: theme.transitions.duration.enteringScreen,
-              }),
           },
         }}
       >
         <DrawerHeader>
-          <LogoText open={drawerOpen}>
-            <span className="first-letter">A</span>
-            <span className="expanded-text">
-              <span className="me">CME</span>
-            </span>
-            <span className="space"> </span>
-            <span className="second-letter">C</span>
-            <span className="expanded-text">
-              <span className="controls">ONTROLS</span>
-            </span>
-          </LogoText>
           <IconButton 
             onClick={toggleDrawer}
             sx={{ 

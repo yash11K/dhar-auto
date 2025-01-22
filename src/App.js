@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Box, Typography, Snackbar } from '@mui/material';
+import { Box, Typography, Snackbar, Button } from '@mui/material';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import TabularView from './components/TabularView';
@@ -12,14 +12,77 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '' });
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: 50,
+    total: 0,
+    totalPages: 0
+  });
+  const [temperatureStats, setTemperatureStats] = useState(null);
+  const [error, setError] = useState(null);
 
-  const fetchData = async () => {
+  const fetchData = async (page = 1, pageSize = 50, dateRange = null) => {
     try {
-      const response = await axios.get('/api/temperature-data');
+      setLoading(true);
+      setError(null);
+      
+      const params = {
+        page,
+        pageSize,
+        ...(dateRange && {
+          startDate: dateRange[0],
+          endDate: dateRange[1]
+        })
+      };
+
+      console.log('Fetching data with params:', params);
+      const { data: response } = await axios.get('/api/temperature-data', { params });
+      console.log('Received response:', response);
+
+      // Validate response structure
+      if (!response || typeof response !== 'object') {
+        throw new Error('Invalid response from server');
+      }
+
+      if (!Array.isArray(response.data)) {
+        throw new Error('Response data is not an array');
+      }
+
+      if (typeof response.total !== 'number' || 
+          typeof response.page !== 'number' || 
+          typeof response.pageSize !== 'number' || 
+          typeof response.totalPages !== 'number') {
+        throw new Error('Missing pagination information in response');
+      }
+
+      if (!response.stats || typeof response.stats !== 'object') {
+        throw new Error('Missing temperature statistics in response');
+      }
+
       setData(response.data);
+      setPagination({
+        page: response.page,
+        pageSize: response.pageSize,
+        total: response.total,
+        totalPages: response.totalPages
+      });
+      setTemperatureStats(response.stats);
     } catch (error) {
       console.error('Error fetching data:', error);
-      setSnackbar({ open: true, message: 'Error fetching data' });
+      setError(error.response?.data?.message || error.message);
+      setSnackbar({ 
+        open: true, 
+        message: 'Error fetching data: ' + (error.response?.data?.message || error.message)
+      });
+      // Clear data on error
+      setData([]);
+      setPagination({
+        page: 1,
+        pageSize: 50,
+        total: 0,
+        totalPages: 0
+      });
+      setTemperatureStats(null);
     } finally {
       setLoading(false);
     }
@@ -29,11 +92,12 @@ function App() {
     setRefreshing(true);
     try {
       await axios.post('/api/refresh-cache');
-      await fetchData();
+      await fetchData(pagination.page, pagination.pageSize);
       setSnackbar({ open: true, message: 'Data refreshed successfully' });
     } catch (error) {
       console.error('Error refreshing data:', error);
-      setSnackbar({ open: true, message: 'Error refreshing data' });
+      setError(error.message);
+      setSnackbar({ open: true, message: 'Error refreshing data: ' + error.message });
     } finally {
       setRefreshing(false);
     }
@@ -51,9 +115,24 @@ function App() {
     '#95a5a6', '#16a085'
   ];
 
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography color="error">Error: {error}</Typography>
+        <Button 
+          variant="contained" 
+          onClick={() => fetchData()} 
+          sx={{ mt: 2 }}
+        >
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
   return (
     <Router>
-      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+      <Box sx={{ display: 'flex', minHeight: '100vh', background: '#fff' }}>
         <Header onRefresh={handleRefresh} refreshing={refreshing} />
         <Box
           component="main"
@@ -61,6 +140,7 @@ function App() {
             flexGrow: 1,
             p: 3,
             pt: 10,
+            background: '#fff',
             transition: (theme) =>
               theme.transitions.create('margin', {
                 easing: theme.transitions.easing.sharp,
@@ -73,9 +153,12 @@ function App() {
               path="/" 
               element={
                 <Dashboard 
-                  data={data} 
+                  data={data || []} 
                   loading={loading} 
-                  temperatureColors={temperatureColors} 
+                  temperatureColors={temperatureColors}
+                  pagination={pagination}
+                  onPageChange={(newPage, newPageSize) => fetchData(newPage, newPageSize)}
+                  temperatureStats={temperatureStats}
                 />
               } 
             />
@@ -83,8 +166,11 @@ function App() {
               path="/table" 
               element={
                 <TabularView 
-                  data={data} 
-                  loading={loading} 
+                  data={data || []} 
+                  loading={loading}
+                  pagination={pagination}
+                  onPageChange={(newPage, newPageSize) => fetchData(newPage, newPageSize)}
+                  temperatureStats={temperatureStats}
                 />
               } 
             />
