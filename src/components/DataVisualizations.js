@@ -8,68 +8,38 @@ import {
     CartesianGrid,
     Tooltip,
     Legend,
-    Scatter,
     ScatterChart,
-    HeatMapSeries,
-    HeatMap,
+    Scatter,
     AreaChart,
     Area
 } from 'recharts';
-import { Box, Paper, Typography, Grid, Card, CardContent } from '@mui/material';
-import { scaleLinear } from 'd3-scale';
-import { interpolateRgb } from 'd3-interpolate';
+import { Box, Paper, Typography, Grid } from '@mui/material';
+import { motion } from 'framer-motion';
+import dayjs from 'dayjs';
 
 const DataVisualizations = ({ data, temperatureStats, temperatureColors }) => {
-    // Process data for heatmap
-    const heatmapData = useMemo(() => {
-        return data.map(row => {
-            const temperatures = [];
-            for (let i = 1; i <= 14; i++) {
-                temperatures.push({
-                    zone: `T${i}`,
-                    value: row[`T${i}`] || 0
-                });
-            }
-            return {
-                time: row.formattedTime,
-                temperatures
-            };
-        });
+    // Process data for time series
+    const timeSeriesData = useMemo(() => {
+        return data.map(row => ({
+            datetime: dayjs(row.datetime).format('HH:mm:ss'),
+            ...Object.fromEntries(
+                Array.from({ length: 14 }, (_, i) => [`T${i + 1}`, row[`T${i + 1}`]])
+            )
+        }));
     }, [data]);
 
-    // Calculate temperature distributions
-    const distributions = useMemo(() => {
-        const ranges = {
-            low: [],
-            normal: [],
-            high: []
-        };
-
-        for (let i = 1; i <= 14; i++) {
-            const zoneTemps = data
-                .map(row => row[`T${i}`])
-                .filter(temp => temp != null);
-
-            ranges.low.push(zoneTemps.filter(t => t <= temperatureStats.q1).length);
-            ranges.normal.push(zoneTemps.filter(t => t > temperatureStats.q1 && t < temperatureStats.q3).length);
-            ranges.high.push(zoneTemps.filter(t => t >= temperatureStats.q3).length);
-        }
-
-        return ranges;
-    }, [data, temperatureStats]);
-
     // Calculate zone correlations
-    const correlations = useMemo(() => {
-        const correlationData = [];
+    const correlationData = useMemo(() => {
+        const correlations = [];
         for (let i = 1; i <= 14; i++) {
             for (let j = i + 1; j <= 14; j++) {
                 const zone1Data = data.map(row => row[`T${i}`]).filter(t => t != null);
                 const zone2Data = data.map(row => row[`T${j}`]).filter(t => t != null);
                 
+                if (zone1Data.length < 2 || zone2Data.length < 2) continue;
+
                 // Calculate correlation coefficient
                 const n = Math.min(zone1Data.length, zone2Data.length);
-                if (n < 2) continue;
-
                 const sum1 = zone1Data.reduce((a, b) => a + b, 0);
                 const sum2 = zone2Data.reduce((a, b) => a + b, 0);
                 const mean1 = sum1 / n;
@@ -87,143 +57,242 @@ const DataVisualizations = ({ data, temperatureStats, temperatureColors }) => {
 
                 const correlation = numerator / Math.sqrt(denom1 * denom2);
                 
-                correlationData.push({
-                    zone1: `T${i}`,
-                    zone2: `T${j}`,
-                    correlation: correlation
+                correlations.push({
+                    x: mean1,
+                    y: mean2,
+                    z: Math.abs(correlation) * 100,
+                    name: `Zone ${i} vs Zone ${j}`,
+                    correlation
                 });
             }
         }
-        return correlationData;
+        return correlations;
     }, [data]);
 
-    // Calculate time-based patterns
-    const timePatterns = useMemo(() => {
-        const patterns = [];
-        const hourlyAverages = new Array(24).fill(0).map(() => ({
-            count: 0,
-            sum: new Array(14).fill(0)
+    // Calculate hourly patterns
+    const hourlyPatterns = useMemo(() => {
+        const patterns = new Array(24).fill(0).map(() => ({
+            hour: 0,
+            readings: Array(14).fill({ sum: 0, count: 0 })
         }));
 
         data.forEach(row => {
-            if (row.time) {
-                const hour = new Date(`1970-01-01T${row.time}`).getHours();
-                hourlyAverages[hour].count++;
-                for (let i = 1; i <= 14; i++) {
-                    if (row[`T${i}`] != null) {
-                        hourlyAverages[hour].sum[i-1] += row[`T${i}`];
-                    }
+            const hour = dayjs(row.datetime).hour();
+            patterns[hour].hour = hour;
+            
+            for (let i = 1; i <= 14; i++) {
+                if (row[`T${i}`] != null) {
+                    patterns[hour].readings[i-1].sum += row[`T${i}`];
+                    patterns[hour].readings[i-1].count++;
                 }
             }
         });
 
-        for (let hour = 0; hour < 24; hour++) {
-            if (hourlyAverages[hour].count > 0) {
-                patterns.push({
-                    hour: `${hour}:00`,
-                    ...hourlyAverages[hour].sum.reduce((acc, sum, idx) => ({
-                        ...acc,
-                        [`T${idx + 1}`]: sum / hourlyAverages[hour].count
-                    }), {})
-                });
-            }
-        }
-
-        return patterns;
+        return patterns.map(({ hour, readings }) => ({
+            hour: `${hour}:00`,
+            ...readings.reduce((acc, { sum, count }, idx) => ({
+                ...acc,
+                [`T${idx + 1}`]: count > 0 ? sum / count : null
+            }), {})
+        }));
     }, [data]);
 
+    const containerVariants = {
+        hidden: { opacity: 0, y: 20 },
+        visible: { 
+            opacity: 1, 
+            y: 0,
+            transition: { duration: 0.5 }
+        }
+    };
+
+    const chartVariants = {
+        hidden: { opacity: 0, scale: 0.95 },
+        visible: { 
+            opacity: 1, 
+            scale: 1,
+            transition: { duration: 0.5, delay: 0.2 }
+        }
+    };
+
     return (
-        <Box sx={{ p: 3 }}>
+        <motion.div
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+        >
             <Grid container spacing={3}>
-                {/* Temperature Distribution */}
+                {/* Time Series Chart */}
                 <Grid item xs={12}>
-                    <Paper sx={{ p: 2 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Temperature Distribution Across Zones
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <AreaChart
-                                data={Array.from({ length: 14 }, (_, i) => ({
-                                    zone: `T${i + 1}`,
-                                    low: distributions.low[i],
-                                    normal: distributions.normal[i],
-                                    high: distributions.high[i]
-                                }))}
-                                stackOffset="expand"
-                            >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="zone" />
-                                <YAxis tickFormatter={(value) => `${(value * 100).toFixed(0)}%`} />
-                                <Tooltip formatter={(value) => `${(value * 100).toFixed(1)}%`} />
-                                <Legend />
-                                <Area type="monotone" dataKey="low" stackId="1" stroke="#52c41a" fill="#52c41a" fillOpacity={0.6} />
-                                <Area type="monotone" dataKey="normal" stackId="1" stroke="#1890ff" fill="#1890ff" fillOpacity={0.6} />
-                                <Area type="monotone" dataKey="high" stackId="1" stroke="#f5222d" fill="#f5222d" fillOpacity={0.6} />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                    <Paper 
+                        elevation={2}
+                        className="rounded-lg overflow-hidden"
+                        sx={{ p: 3, background: 'linear-gradient(to right, #ffffff, #f8f9fa)' }}
+                    >
+                        <motion.div variants={chartVariants}>
+                            <Typography variant="h6" gutterBottom className="font-semibold">
+                                Temperature Time Series
+                            </Typography>
+                            <Box sx={{ height: 400 }}>
+                                <ResponsiveContainer>
+                                    <LineChart data={timeSeriesData}>
+                                        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                                        <XAxis 
+                                            dataKey="datetime"
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <YAxis 
+                                            label={{ 
+                                                value: 'Temperature (°C)', 
+                                                angle: -90, 
+                                                position: 'insideLeft',
+                                                style: { fill: '#666' }
+                                            }}
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <Tooltip 
+                                            contentStyle={{
+                                                background: 'rgba(255, 255, 255, 0.9)',
+                                                border: '1px solid #ddd',
+                                                borderRadius: '4px'
+                                            }}
+                                        />
+                                        <Legend />
+                                        {Array.from({ length: 14 }, (_, i) => (
+                                            <Line
+                                                key={`T${i + 1}`}
+                                                type="monotone"
+                                                dataKey={`T${i + 1}`}
+                                                stroke={temperatureColors[i]}
+                                                dot={false}
+                                                strokeWidth={2}
+                                                name={`Zone ${i + 1}`}
+                                            />
+                                        ))}
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </Box>
+                        </motion.div>
                     </Paper>
                 </Grid>
 
-                {/* Zone Correlation Matrix */}
+                {/* Correlation Scatter Plot */}
                 <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 2 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Zone Temperature Correlations
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <ScatterChart>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis 
-                                    dataKey="zone1" 
-                                    type="category"
-                                    allowDuplicatedCategory={false}
-                                />
-                                <YAxis 
-                                    dataKey="zone2"
-                                    type="category"
-                                    allowDuplicatedCategory={false}
-                                />
-                                <Tooltip 
-                                    formatter={(value) => [`${(value * 100).toFixed(1)}%`, 'Correlation']}
-                                />
-                                <Scatter
-                                    data={correlations}
-                                    fill="#8884d8"
-                                    fillOpacity={0.6}
-                                />
-                            </ScatterChart>
-                        </ResponsiveContainer>
+                    <Paper 
+                        elevation={2}
+                        className="rounded-lg overflow-hidden"
+                        sx={{ p: 3, background: 'linear-gradient(to right, #ffffff, #f8f9fa)' }}
+                    >
+                        <motion.div variants={chartVariants}>
+                            <Typography variant="h6" gutterBottom className="font-semibold">
+                                Zone Temperature Correlations
+                            </Typography>
+                            <Box sx={{ height: 400 }}>
+                                <ResponsiveContainer>
+                                    <ScatterChart>
+                                        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                                        <XAxis 
+                                            type="number"
+                                            dataKey="x"
+                                            name="Temperature Zone 1"
+                                            label={{ value: 'Temperature Zone 1 (°C)', position: 'bottom' }}
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <YAxis 
+                                            type="number"
+                                            dataKey="y"
+                                            name="Temperature Zone 2"
+                                            label={{ value: 'Temperature Zone 2 (°C)', angle: -90, position: 'left' }}
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <Tooltip 
+                                            cursor={{ strokeDasharray: '3 3' }}
+                                            contentStyle={{
+                                                background: 'rgba(255, 255, 255, 0.9)',
+                                                border: '1px solid #ddd',
+                                                borderRadius: '4px'
+                                            }}
+                                            formatter={(value, name, props) => {
+                                                if (name === 'correlation') {
+                                                    return [`${props.payload.correlation.toFixed(2)}`, 'Correlation'];
+                                                }
+                                                return [value.toFixed(2), name];
+                                            }}
+                                        />
+                                        <Scatter
+                                            data={correlationData}
+                                            fill="#8884d8"
+                                            fillOpacity={0.6}
+                                        />
+                                    </ScatterChart>
+                                </ResponsiveContainer>
+                            </Box>
+                        </motion.div>
                     </Paper>
                 </Grid>
 
-                {/* Time-based Pattern Analysis */}
+                {/* Hourly Patterns */}
                 <Grid item xs={12} md={6}>
-                    <Paper sx={{ p: 2 }}>
-                        <Typography variant="h6" gutterBottom>
-                            Hourly Temperature Patterns
-                        </Typography>
-                        <ResponsiveContainer width="100%" height={400}>
-                            <LineChart data={timePatterns}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="hour" />
-                                <YAxis />
-                                <Tooltip />
-                                <Legend />
-                                {Array.from({ length: 14 }, (_, i) => (
-                                    <Line
-                                        key={`T${i + 1}`}
-                                        type="monotone"
-                                        dataKey={`T${i + 1}`}
-                                        stroke={temperatureColors[i]}
-                                        dot={false}
-                                    />
-                                ))}
-                            </LineChart>
-                        </ResponsiveContainer>
+                    <Paper 
+                        elevation={2}
+                        className="rounded-lg overflow-hidden"
+                        sx={{ p: 3, background: 'linear-gradient(to right, #ffffff, #f8f9fa)' }}
+                    >
+                        <motion.div variants={chartVariants}>
+                            <Typography variant="h6" gutterBottom className="font-semibold">
+                                Hourly Temperature Patterns
+                            </Typography>
+                            <Box sx={{ height: 400 }}>
+                                <ResponsiveContainer>
+                                    <AreaChart data={hourlyPatterns}>
+                                        <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+                                        <XAxis 
+                                            dataKey="hour"
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <YAxis 
+                                            label={{ 
+                                                value: 'Temperature (°C)', 
+                                                angle: -90, 
+                                                position: 'insideLeft',
+                                                style: { fill: '#666' }
+                                            }}
+                                            tick={{ fill: '#666' }}
+                                            stroke="#666"
+                                        />
+                                        <Tooltip 
+                                            contentStyle={{
+                                                background: 'rgba(255, 255, 255, 0.9)',
+                                                border: '1px solid #ddd',
+                                                borderRadius: '4px'
+                                            }}
+                                        />
+                                        <Legend />
+                                        {Array.from({ length: 14 }, (_, i) => (
+                                            <Area
+                                                key={`T${i + 1}`}
+                                                type="monotone"
+                                                dataKey={`T${i + 1}`}
+                                                stroke={temperatureColors[i]}
+                                                fill={temperatureColors[i]}
+                                                fillOpacity={0.1}
+                                                strokeWidth={2}
+                                                name={`Zone ${i + 1}`}
+                                            />
+                                        ))}
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </Box>
+                        </motion.div>
                     </Paper>
                 </Grid>
             </Grid>
-        </Box>
+        </motion.div>
     );
 };
 

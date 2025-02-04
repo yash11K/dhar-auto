@@ -15,6 +15,7 @@ import {
   InputLabel,
   OutlinedInput,
   Stack,
+  Button,
 } from "@mui/material";
 import {
   LineChart,
@@ -32,7 +33,6 @@ import ThermostatIcon from "@mui/icons-material/Thermostat";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import CloseIcon from "@mui/icons-material/Close";
-import RefreshIcon from '@mui/icons-material/Refresh';
 import { useState, useMemo } from "react";
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
@@ -41,6 +41,8 @@ import 'antd/dist/reset.css';
 import { DatePicker } from 'antd';
 import { Pagination } from 'antd';
 import DataVisualizations from './DataVisualizations';
+import DailyZoneGraph from './DailyZoneGraph';
+import BroaderDashboard from './BroaderDashboard';
 const { RangePicker } = DatePicker;
 dayjs.extend(isBetween);
 
@@ -80,127 +82,174 @@ export const getTemperatureColor = (value, ranges) => {
 
 function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, temperatureStats }) {
   const [selectedZones, setSelectedZones] = useState(Array.from({ length: 14 }, (_, i) => i + 1));
-  const [dateRange, setDateRange] = useState(null);
+  const [dateRange, setDateRange] = useState([dayjs().subtract(30, 'days'), dayjs()]);
   const [minThreshold, setMinThreshold] = useState('');
   const [maxThreshold, setMaxThreshold] = useState('');
 
-  const handleZoneChange = (event) => {
-    const { value } = event.target;
-    setSelectedZones(value);
+  const handleDateRangeChange = (dates) => {
+    if (!dates || !dates[0] || !dates[1]) {
+      const defaultRange = [dayjs().subtract(30, 'days'), dayjs()];
+      setDateRange(defaultRange);
+      onPageChange(0, pagination.limit, defaultRange);
+      return;
+    }
+    
+    // Ensure we have valid dayjs objects
+    const startDate = dayjs(dates[0]);
+    const endDate = dayjs(dates[1]);
+    
+    if (!startDate.isValid() || !endDate.isValid()) {
+      console.error('Invalid date range selected');
+      return;
+    }
+    
+    const newRange = [startDate, endDate];
+    setDateRange(newRange);
+    onPageChange(0, pagination.limit, newRange);
   };
 
-  const handleDateRangeChange = (dates) => {
-    setDateRange(dates);
-    if (dates) {
-      onPageChange(1, pagination.pageSize, dates.map(date => date.format('YYYY-MM-DD')));
-    } else {
-      onPageChange(1, pagination.pageSize);
-    }
-  };
+  // Add renderSelectedZones function
+  const renderSelectedZones = (selected) => (
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+      {selected.map((zoneNum) => (
+        <Chip
+          key={zoneNum}
+          label={`Zone ${zoneNum}`}
+          size="small"
+          sx={{
+            backgroundColor: `${temperatureColors[zoneNum - 1]}20`,
+            borderColor: temperatureColors[zoneNum - 1],
+            color: temperatureColors[zoneNum - 1],
+            '& .MuiChip-label': {
+              fontWeight: 500,
+            },
+          }}
+        />
+      ))}
+    </Box>
+  );
 
   // Process data for the chart
   const chartData = useMemo(() => {
+    if (!data || data.length === 0) {
+      // Return empty data points for visualization
+      const days = dateRange[1].diff(dateRange[0], 'day') + 1;
+      return Array.from({ length: days }, (_, i) => ({
+        datetime: dayjs(dateRange[0]).add(i, 'day').toISOString(),
+        formattedDate: dayjs(dateRange[0]).add(i, 'day').format('DD/MM/YYYY'),
+        ...Array.from({ length: 14 }, (_, j) => ({ [`T${j + 1}`]: null })).reduce((acc, curr) => ({ ...acc, ...curr }), {})
+      }));
+    }
+
     return data.map(item => ({
       ...item,
-      formattedDate: dayjs(item.date).format('DD/MM/YYYY'),
-      formattedTime: item.time
+      formattedDate: dayjs(item.datetime).format('DD/MM/YYYY'),
+      formattedTime: dayjs(item.datetime).format('HH:mm:ss')
     }));
-  }, [data]);
+  }, [data, dateRange]);
 
-  console.log('Chart data sample:', chartData[0]); // Debug log
+  // Custom legend renderer with clickable zones
+  const renderLegend = (props) => {
+    const { payload } = props;
+    
+    const handleSelectAll = () => {
+      setSelectedZones(Array.from({ length: 14 }, (_, i) => i + 1));
+    };
 
-  // Function to render selected zones with limit
-  const renderSelectedZones = (selected) => {
-    const maxDisplay = 3;
-    const displayedZones = selected.slice(0, maxDisplay);
+    const handleSelectNone = () => {
+      setSelectedZones([]);
+    };
     
     return (
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-        {displayedZones.map((value) => (
-          <Chip 
-            key={value} 
-            label={`Zone ${value}`} 
-            size="small"
-            sx={{ 
-              bgcolor: temperatureColors[value - 1],
-              color: '#fff',
-              '& .MuiChip-deleteIcon': {
-                color: '#fff',
+      <Box sx={{ width: '100%', px: 2, py: 1 }}>
+        <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+          <Button 
+            size="small" 
+            onClick={handleSelectAll}
+            variant="outlined"
+          >
+            Select All
+          </Button>
+          <Button 
+            size="small" 
+            onClick={handleSelectNone}
+            variant="outlined"
+          >
+            Clear All
+          </Button>
+        </Box>
+        <Box 
+          sx={{ 
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+            gap: 1,
+          }}
+        >
+          {payload.map((entry, index) => (
+            <Box
+              key={`legend-${index}`}
+              onClick={() => {
+                const zoneNum = parseInt(entry.value.split(' ')[1]);
+                setSelectedZones(prev => 
+                  prev.includes(zoneNum) 
+                    ? prev.filter(z => z !== zoneNum)
+                    : [...prev, zoneNum]
+                );
+              }}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                padding: '4px 8px',
+                borderRadius: 1,
+                transition: 'all 0.2s',
                 '&:hover': {
-                  opacity: 0.7,
+                  backgroundColor: 'rgba(0, 0, 0, 0.04)',
                 },
-              },
-            }}
-          />
-        ))}
-        {selected.length > maxDisplay && (
-          <Chip 
-            label={`+${selected.length - maxDisplay} more`} 
-            size="small"
-            sx={{ 
-              bgcolor: 'grey.300',
-              color: 'text.primary',
-            }}
-          />
-        )}
+                backgroundColor: selectedZones.includes(parseInt(entry.value.split(' ')[1]))
+                  ? 'rgba(0, 0, 0, 0.08)'
+                  : 'transparent',
+              }}
+            >
+              <Box
+                sx={{
+                  width: 16,
+                  height: 2,
+                  backgroundColor: entry.color,
+                  flexShrink: 0,
+                }}
+              />
+              <Typography variant="body2" noWrap>
+                {entry.value}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
       </Box>
     );
   };
 
-  // Custom legend renderer
-  const renderLegend = (props) => {
-    const { payload } = props;
-    
-    return (
-      <Box 
-        sx={{ 
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-          gap: 1,
-          width: '100%',
-          px: 2,
-          py: 1,
-        }}
-      >
-        {payload.map((entry, index) => (
-          <Box
-            key={`legend-${index}`}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              fontSize: '0.875rem',
-            }}
-          >
-            <Box
-              sx={{
-                width: 16,
-                height: 2,
-                backgroundColor: entry.color,
-                flexShrink: 0,
-              }}
-            />
-            <Typography variant="body2" noWrap>
-              {entry.value}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    );
+  // Safely get temperature stats with defaults
+  const safeStats = {
+    min: temperatureStats?.min ?? 0,
+    max: temperatureStats?.max ?? 0,
+    avg: temperatureStats?.avg ?? 0
   };
 
   return (
     <Paper sx={{ p: 3, mb: 4 }}>
       <Stack spacing={2} sx={{ mb: 3 }}>
         {/* Controls layout */}
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           {/* Zone Selection */}
           <FormControl sx={{ width: '320px' }}>
             <InputLabel>Zones</InputLabel>
             <Select
               multiple
               value={selectedZones}
-              onChange={handleZoneChange}
+              onChange={(e) => setSelectedZones(e.target.value)}
               input={<OutlinedInput label="Zones" />}
               renderValue={renderSelectedZones}
               size="small"
@@ -235,12 +284,19 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
 
           {/* Date Range Picker */}
           <RangePicker
-            format="DD/MM/YYYY"
             value={dateRange}
             onChange={handleDateRangeChange}
-            allowClear
+            allowClear={false}
             style={{ width: '320px' }}
-            placeholder={['Start Date', 'End Date']}
+            ranges={{
+              'Last 7 Days': [dayjs().subtract(6, 'days'), dayjs()],
+              'Last 14 Days': [dayjs().subtract(13, 'days'), dayjs()],
+              'Last 30 Days': [dayjs().subtract(29, 'days'), dayjs()],
+            }}
+            disabledDate={(current) => {
+              // Can't select days after today
+              return current && current > dayjs().endOf('day');
+            }}
           />
 
           {/* Threshold Controls */}
@@ -265,16 +321,22 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
         </Box>
 
         {/* Temperature Range Legend */}
-        {temperatureStats && (
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary">
+            Temperature Ranges:
+          </Typography>
+          {!data || data.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              Temperature Ranges:
+              No data available for the selected date range
             </Typography>
-            <Tag color="success">Low: ≤{temperatureStats.q1.toFixed(2)}°C</Tag>
-            <Tag color="processing">Normal: {temperatureStats.q1.toFixed(2)}-{temperatureStats.q3.toFixed(2)}°C</Tag>
-            <Tag color="error">High: ≥{temperatureStats.q3.toFixed(2)}°C</Tag>
-          </Box>
-        )}
+          ) : (
+            <>
+              <Tag color="success">Low: {safeStats.min.toFixed(2)}°C</Tag>
+              <Tag color="processing">Avg: {safeStats.avg.toFixed(2)}°C</Tag>
+              <Tag color="error">High: {safeStats.max.toFixed(2)}°C</Tag>
+            </>
+          )}
+        </Box>
       </Stack>
 
       {/* Chart */}
@@ -282,7 +344,7 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
         <ResponsiveContainer width="100%" height="100%">
           <LineChart 
             data={chartData} 
-            margin={{ top: 5, right: 30, left: 20, bottom: 45 }}
+            margin={{ top: 5, right: 30, left: 40, bottom: 45 }}
           >
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis 
@@ -295,12 +357,18 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
               tickMargin={15}
             />
             <YAxis 
-              label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft' }}
+              label={{ 
+                value: 'Temperature (°C)', 
+                angle: -90, 
+                position: 'insideLeft',
+                offset: -30,
+                style: { textAnchor: 'middle' }
+              }}
               domain={['auto', 'auto']}
             />
             <Tooltip 
               labelFormatter={(label) => label}
-              formatter={(value) => [value ? `${value.toFixed(2)}°C` : 'N/A']}
+              formatter={(value) => value ? [`${Number(value).toFixed(2)}°C`] : ['No data']}
               contentStyle={{
                 backgroundColor: 'rgba(255, 255, 255, 0.9)',
                 border: '1px solid #ccc',
@@ -312,16 +380,24 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
               <ReferenceLine 
                 y={Number(minThreshold)} 
                 stroke="#52c41a"
-                strokeDasharray="3 3" 
-                label={{ value: 'Min Threshold', position: 'insideLeft' }} 
+                strokeDasharray="3 3"
+                label={{ 
+                  value: `Min: ${minThreshold}°C`,
+                  position: 'right',
+                  fill: '#52c41a'
+                }}
               />
             )}
             {maxThreshold && (
               <ReferenceLine 
-                y={Number(maxThreshold)} 
+                y={Number(maxThreshold)}
                 stroke="#f5222d"
-                strokeDasharray="3 3" 
-                label={{ value: 'Max Threshold', position: 'insideRight' }} 
+                strokeDasharray="3 3"
+                label={{ 
+                  value: `Max: ${maxThreshold}°C`,
+                  position: 'right',
+                  fill: '#f5222d'
+                }}
               />
             )}
             {selectedZones.map((zoneNum) => (
@@ -333,24 +409,71 @@ function ConfigurableGraph({ data, temperatureColors, pagination, onPageChange, 
                 name={`Zone ${zoneNum}`}
                 dot={false}
                 activeDot={{ r: 6 }}
-                connectNulls
+                connectNulls={false}
               />
             ))}
           </LineChart>
         </ResponsiveContainer>
+        {data.length === 0 && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              backdropFilter: 'blur(4px)',
+              borderRadius: 1,
+            }}
+          >
+            <ThermostatIcon 
+              sx={{ 
+                fontSize: 48, 
+                color: 'text.secondary',
+                mb: 2
+              }} 
+            />
+            <Typography 
+              variant="h6" 
+              color="text.secondary"
+              sx={{ mb: 1 }}
+            >
+              No Temperature Data Available
+            </Typography>
+            <Typography 
+              variant="body2" 
+              color="text.secondary"
+              sx={{ mb: 2 }}
+            >
+              No recordings found between {dateRange[0].format('MMMM D, YYYY')} and {dateRange[1].format('MMMM D, YYYY')}
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => handleDateRangeChange([dayjs().subtract(30, 'days'), dayjs()])}
+              startIcon={<ArrowBackIcon />}
+            >
+              Return to Last 30 Days
+            </Button>
+          </Box>
+        )}
       </Box>
 
-      {/* Pagination */}
-      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-        <Pagination
-          current={pagination.page}
-          total={pagination.total}
-          pageSize={pagination.pageSize}
-          onChange={(page, pageSize) => onPageChange(page, pageSize)}
-          showSizeChanger
-          showQuickJumper
-          showTotal={(total) => `Total ${total} items`}
-        />
+      {/* Data info */}
+      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="body2" color="text.secondary">
+          Date Range: {dateRange[0].format('MMMM D, YYYY')} - {dateRange[1].format('MMMM D, YYYY')}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {!data || data.length === 0 
+            ? 'No data available for the selected date range'
+            : `${data.length} temperature recordings`}
+        </Typography>
       </Box>
     </Paper>
   );
@@ -411,9 +534,6 @@ function DetailedGraphView({ open, onClose, zoneNumber, data, color }) {
             justifyContent: "space-between",
           }}
         >
-          <Typography variant="h5">
-            Zone {zoneNumber} Temperature Analysis
-          </Typography>
           <FormControl size="small">
             <Select
               value={timeRange}
@@ -688,7 +808,25 @@ function ZoneCard({ zoneNumber, data, color, temperatureStats }) {
   );
 }
 
-function Dashboard({ data, loading, temperatureColors, pagination, onPageChange, temperatureStats }) {
+function Dashboard({ data = [], loading = false, pagination = {}, onPageChange, temperatureStats = null }) {
+  // Default temperature colors
+  const temperatureColors = [
+    '#3B82F6', // blue-500
+    '#10B981', // emerald-500
+    '#F59E0B', // amber-500
+    '#EF4444', // red-500
+    '#8B5CF6', // violet-500
+    '#EC4899', // pink-500
+    '#06B6D4', // cyan-500
+    '#F97316', // orange-500
+    '#6366F1', // indigo-500
+    '#14B8A6', // teal-500
+    '#84CC16', // lime-500
+    '#9333EA', // purple-500
+    '#64748B', // slate-500
+    '#0EA5E9'  // sky-500
+  ];
+
   if (loading) {
     return (
       <Box sx={{ p: 3 }}>
@@ -697,17 +835,11 @@ function Dashboard({ data, loading, temperatureColors, pagination, onPageChange,
     );
   }
 
-  if (!data || data.length === 0) {
-    return (
-      <Box sx={{ p: 3 }}>
-        <Typography>No temperature data available</Typography>
-      </Box>
-    );
-  }
-
   return (
     <Box sx={{ p: 3 }}>
-      <ConfigurableGraph 
+      {/* Monthly Overview */}
+      <Typography variant="h6" sx={{ mb: 2 }}>Temperature Overview</Typography>
+      <BroaderDashboard 
         data={data} 
         temperatureColors={temperatureColors}
         pagination={pagination}
@@ -715,12 +847,19 @@ function Dashboard({ data, loading, temperatureColors, pagination, onPageChange,
         temperatureStats={temperatureStats}
       />
 
-      <DataVisualizations 
-        data={data}
-        temperatureStats={temperatureStats}
+      {/* Daily View */}
+      <Typography variant="h6" sx={{ mb: 2, mt: 4 }}>Daily Temperature View</Typography>
+      <DailyZoneGraph 
+        data={data} 
         temperatureColors={temperatureColors}
+        pagination={pagination}
+        onPageChange={onPageChange}
+        temperatureStats={temperatureStats}
       />
 
+
+      {/* Zone Overview */}
+      <Typography variant="h6" sx={{ mb: 2, mt: 4 }}>Zone Overview</Typography>
       <Grid container spacing={3}>
         {Array.from({ length: 14 }, (_, i) => (
           <Grid item xs={12} sm={6} md={4} lg={3} key={i}>

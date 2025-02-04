@@ -6,67 +6,69 @@ import Dashboard from './components/Dashboard';
 import TabularView from './components/TabularView';
 import './App.css';
 import axios from 'axios';
+import dayjs from 'dayjs';
+import ExportPage from './components/ExportPage';
+import { MenuOutlined, ExportOutlined } from '@ant-design/icons';
 
 function App() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '' });
+  const [dateRange, setDateRange] = useState([
+    dayjs().subtract(30, 'days'),
+    dayjs()
+  ]);
   const [pagination, setPagination] = useState({
-    page: 1,
-    pageSize: 50,
+    limit: 1000,
+    offset: 0,
     total: 0,
-    totalPages: 0
+    dateRange: [dayjs().subtract(30, 'days'), dayjs()]
   });
   const [temperatureStats, setTemperatureStats] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedMenuItem, setSelectedMenuItem] = useState('dashboard');
 
-  const fetchData = async (page = 1, pageSize = 50, dateRange = null) => {
+  const fetchData = async (newOffset = 0, newLimit = pagination.limit, newDateRange = dateRange) => {
     try {
       setLoading(true);
       setError(null);
       
+      // Ensure we have valid dayjs objects
+      const startDate = dayjs(newDateRange?.[0] || dateRange[0]);
+      const endDate = dayjs(newDateRange?.[1] || dateRange[1]);
+      
+      if (!startDate.isValid() || !endDate.isValid()) {
+        throw new Error('Invalid date range');
+      }
+
       const params = {
-        page,
-        pageSize,
-        ...(dateRange && {
-          startDate: dateRange[0],
-          endDate: dateRange[1]
-        })
+        startDate: startDate.startOf('day').toISOString(),
+        endDate: endDate.endOf('day').toISOString(),
+        limit: newLimit,
+        offset: newOffset
       };
 
       console.log('Fetching data with params:', params);
-      const { data: response } = await axios.get('/api/temperature-data', { params });
+      const response = await axios.get('http://localhost:3001/api/temperature-data', { params });
       console.log('Received response:', response);
 
       // Validate response structure
-      if (!response || typeof response !== 'object') {
+      if (!response.data || typeof response.data !== 'object') {
         throw new Error('Invalid response from server');
       }
 
-      if (!Array.isArray(response.data)) {
-        throw new Error('Response data is not an array');
-      }
-
-      if (typeof response.total !== 'number' || 
-          typeof response.page !== 'number' || 
-          typeof response.pageSize !== 'number' || 
-          typeof response.totalPages !== 'number') {
-        throw new Error('Missing pagination information in response');
-      }
-
-      if (!response.stats || typeof response.stats !== 'object') {
-        throw new Error('Missing temperature statistics in response');
-      }
-
-      setData(response.data);
+      const responseData = response.data;
+      
+      setData(Array.isArray(responseData.data) ? responseData.data : []);
       setPagination({
-        page: response.page,
-        pageSize: response.pageSize,
-        total: response.total,
-        totalPages: response.totalPages
+        limit: newLimit,
+        offset: newOffset,
+        total: responseData.total || 0,
+        dateRange: [startDate, endDate]
       });
-      setTemperatureStats(response.stats);
+      setDateRange([startDate, endDate]);
+      setTemperatureStats(responseData.stats || null);
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(error.response?.data?.message || error.message);
@@ -74,14 +76,8 @@ function App() {
         open: true, 
         message: 'Error fetching data: ' + (error.response?.data?.message || error.message)
       });
-      // Clear data on error
+      // Set empty data on error
       setData([]);
-      setPagination({
-        page: 1,
-        pageSize: 50,
-        total: 0,
-        totalPages: 0
-      });
       setTemperatureStats(null);
     } finally {
       setLoading(false);
@@ -91,8 +87,7 @@ function App() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await axios.post('/api/refresh-cache');
-      await fetchData(pagination.page, pagination.pageSize);
+      await fetchData();
       setSnackbar({ open: true, message: 'Data refreshed successfully' });
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -103,17 +98,77 @@ function App() {
     }
   };
 
+  const handlePageChange = async (newOffset, newLimit, newDateRange) => {
+    try {
+      await fetchData(newOffset, newLimit, newDateRange);
+    } catch (error) {
+      console.error('Error changing page:', error);
+      setSnackbar({
+        open: true,
+        message: 'Error changing page: ' + error.message
+      });
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Define colors for temperature lines
+  // Define colors for temperature lines with Tailwind-like colors
   const temperatureColors = [
-    '#8884d8', '#82ca9d', '#ffc658', '#ff7300', 
-    '#e74c3c', '#3498db', '#2ecc71', '#f1c40f',
-    '#9b59b6', '#34495e', '#1abc9c', '#e67e22',
-    '#95a5a6', '#16a085'
+    '#3B82F6', // blue-500
+    '#10B981', // emerald-500
+    '#F59E0B', // amber-500
+    '#EF4444', // red-500
+    '#8B5CF6', // violet-500
+    '#EC4899', // pink-500
+    '#06B6D4', // cyan-500
+    '#F97316', // orange-500
+    '#6366F1', // indigo-500
+    '#14B8A6', // teal-500
+    '#84CC16', // lime-500
+    '#9333EA', // purple-500
+    '#64748B', // slate-500
+    '#0EA5E9'  // sky-500
   ];
+
+  const menuItems = [
+    {
+      key: 'dashboard',
+      icon: <MenuOutlined />,
+      label: 'Dashboard'
+    },
+    {
+      key: 'export',
+      icon: <ExportOutlined />,
+      label: 'Export Data'
+    }
+  ];
+
+  const renderContent = () => {
+    switch (selectedMenuItem) {
+      case 'dashboard':
+        return (
+          <Dashboard
+            data={data || []}
+            loading={loading}
+            pagination={pagination || { limit: 1000, offset: 0, total: 0, dateRange }}
+            onPageChange={handlePageChange}
+            temperatureStats={temperatureStats}
+          />
+        );
+      case 'export':
+        return (
+          <ExportPage
+            temperatureStats={temperatureStats}
+            dateRange={dateRange}
+            onDateRangeChange={(newRange) => handlePageChange(0, pagination.limit, newRange)}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   if (error) {
     return (
@@ -152,14 +207,7 @@ function App() {
             <Route 
               path="/" 
               element={
-                <Dashboard 
-                  data={data || []} 
-                  loading={loading} 
-                  temperatureColors={temperatureColors}
-                  pagination={pagination}
-                  onPageChange={(newPage, newPageSize) => fetchData(newPage, newPageSize)}
-                  temperatureStats={temperatureStats}
-                />
+                renderContent()
               } 
             />
             <Route 
