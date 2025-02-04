@@ -50,7 +50,7 @@ Git helps us download and manage the code:
    ```
 3. Clone (download) the application:
    ```bash
-   git clone https://github.com/yash11k/mdb-dashboard
+   git clone [https://github.com/yash11k/dhar-auto](https://github.com/yash11K/dhar-auto)
    cd mdb-dashboard
    ```
 
