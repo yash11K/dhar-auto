@@ -4,7 +4,7 @@ import { ReloadOutlined, SettingOutlined, InfoCircleOutlined, FilterOutlined, Do
 import dayjs from 'dayjs';
 import 'antd/dist/reset.css';
 import { motion } from 'framer-motion';
-import { Box, Paper } from '@mui/material';
+import { Box } from '@mui/material';
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -28,10 +28,12 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
   const handleChange = (pagination) => {
     const newOffset = (pagination.current - 1) * pagination.pageSize;
     if (dateRange && dateRange.length === 2) {
-      onPageChange(newOffset, pagination.pageSize, [
-        dateRange[0].startOf('day').toISOString(),
-        dateRange[1].endOf('day').toISOString()
-      ]);
+      const payload = [
+        dayjs(dateRange[0]).format('YYYY-MM-DD'),
+        dayjs(dateRange[1]).format('YYYY-MM-DD')
+      ];
+      console.log('Pagination change payload:', payload);  // Debug log
+      onPageChange(newOffset, undefined, payload);
     }
   };
 
@@ -43,18 +45,28 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
   };
 
   const handleDateRangeChange = (dates) => {
+    console.log('Raw dates from picker:', dates);  // Debug log
+    
     if (!dates || !dates[0] || !dates[1]) {
       const defaultRange = [dayjs().subtract(30, 'days'), dayjs()];
       setDateRange(defaultRange);
-      onPageChange(0, pagination.limit, [
-        defaultRange[0].startOf('day').toISOString(),
-        defaultRange[1].endOf('day').toISOString()
-      ]);
+      const payload = [
+        defaultRange[0].format('YYYY-MM-DD'),
+        defaultRange[1].format('YYYY-MM-DD')
+      ];
+      console.log('Default range payload:', payload);  // Debug log
+      onPageChange(0, undefined, payload);
       return;
     }
     
+    // Ensure we're working with dayjs objects and set to start/end of day
     const startDate = dayjs(dates[0]).startOf('day');
     const endDate = dayjs(dates[1]).endOf('day');
+    
+    console.log('Processed dates:', {  // Debug log
+      startDate: startDate.format(),
+      endDate: endDate.format()
+    });
     
     if (!startDate.isValid() || !endDate.isValid()) {
       console.error('Invalid date range selected');
@@ -62,20 +74,24 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
     }
     
     setDateRange([startDate, endDate]);
-    onPageChange(0, pagination.limit, [
-      startDate.toISOString(),
-      endDate.toISOString()
-    ]);
+    const payload = [
+      startDate.format('YYYY-MM-DD'),
+      endDate.format('YYYY-MM-DD')
+    ];
+    console.log('Final payload:', payload);  // Debug log
+    onPageChange(0, undefined, payload);
   };
 
   const resetSelections = () => {
     const defaultRange = [dayjs().subtract(30, 'days'), dayjs()];
     setSelectedZones(Array.from({ length: 14 }, (_, i) => i + 1));
     setDateRange(defaultRange);
-    onPageChange(0, pagination.limit, [
-      defaultRange[0].startOf('day').toISOString(),
-      defaultRange[1].endOf('day').toISOString()
-    ]);
+    const payload = [
+      defaultRange[0].format('YYYY-MM-DD'),
+      defaultRange[1].format('YYYY-MM-DD')
+    ];
+    console.log('Reset selections payload:', payload);  // Debug log
+    onPageChange(0, undefined, payload);
   };
 
   const resetCalculations = () => {
@@ -122,14 +138,29 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
 
   // Process data for display
   const tableData = useMemo(() => {
+    console.log('TabularView processing data:', {
+      hasData: Array.isArray(data),
+      dataLength: data?.length,
+      firstRecord: data?.[0],
+      selectedZones
+    });
+
     if (!data || !Array.isArray(data)) {
       console.log('Data is not available yet:', data);
       return [];
     }
-    return data.map(item => ({
+
+    const processed = data.map(item => ({
       ...item,
-      key: item.id || Math.random(),
+      key: item.id || item.datetime || Math.random(),
     }));
+
+    console.log('Processed table data:', {
+      length: processed.length,
+      firstRow: processed[0]
+    });
+
+    return processed;
   }, [data]);
 
   const renderTemperature = (value) => {
@@ -230,6 +261,16 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
     key: `T${zoneNum}`,
     render: renderTemperature,
   }));
+
+  console.log('Table configuration:', {
+    columnsLength: baseColumns.length + temperatureColumns.length,
+    dataLength: tableData.length,
+    pagination: {
+      total: pagination.total,
+      pageSize: pagination.limit,
+      current: Math.floor(pagination.offset / pagination.limit) + 1
+    }
+  });
 
   return (
     <motion.div
@@ -427,8 +468,8 @@ function TabularView({ data, loading, pagination, onPageChange, temperatureStats
             size="small"
             pagination={{
               total: pagination.total,
-              pageSize: pagination.limit,
-              current: Math.floor(pagination.offset / pagination.limit) + 1,
+              pageSize: pagination.limit || 10,
+              current: pagination.offset ? Math.floor(pagination.offset / (pagination.limit || 10)) + 1 : 1,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total) => `Total ${total} records`,

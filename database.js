@@ -1,10 +1,11 @@
 const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
 const path = require('path');
-const fs = require('fs');
+const fs = require('fs-extra');
 
 // Get MDB file path from environment variable or use default
 const MDB_FILE_PATH = process.env.MDB_FILE_PATH || path.join(__dirname, 'your-database.mdb');
+const DB_PATH = path.join(__dirname, 'temperature_data.sqlite');
 
 // Validate MDB file existence
 if (!fs.existsSync(MDB_FILE_PATH)) {
@@ -16,61 +17,84 @@ if (!fs.existsSync(MDB_FILE_PATH)) {
 // Database connection
 let db = null;
 
-// Initialize database
-async function initializeDatabase() {
+// First-time database setup
+async function setupDatabase() {
+    const dbDir = path.dirname(DB_PATH);
+
+    try {
+        // Ensure the database directory exists with proper permissions
+        await fs.ensureDir(dbDir, { mode: 0o755 });
+
+        // Create tables if they don't exist
+        const tempDb = await open({
+            filename: DB_PATH,
+            driver: sqlite3.Database,
+            mode: sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE
+        });
+
+        await tempDb.exec(`
+            CREATE TABLE IF NOT EXISTS temperature_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                datetime DATETIME NOT NULL,
+                T1 REAL,
+                T2 REAL,
+                T3 REAL,
+                T4 REAL,
+                T5 REAL,
+                T6 REAL,
+                T7 REAL,
+                T8 REAL,
+                T9 REAL,
+                T10 REAL,
+                T11 REAL,
+                T12 REAL,
+                T13 REAL,
+                T14 REAL,
+                events INTEGER DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_datetime ON temperature_readings(datetime);
+        `);
+
+        await tempDb.close();
+        console.log('Database setup completed successfully');
+    } catch (error) {
+        console.error('Database setup error:', error.message);
+        throw error;
+    }
+}
+
+// Get database connection
+async function getDatabase() {
     if (db) return db;
 
-    const dbPath = path.join(__dirname, 'temperature_data.sqlite');
-
-    // Delete existing database if it exists
     try {
-        if (fs.existsSync(dbPath)) {
-            console.log('Removing existing database...');
-            fs.unlinkSync(dbPath);
+        // If database file doesn't exist, run first-time setup
+        if (!fs.existsSync(DB_PATH)) {
+            await setupDatabase();
         }
+
+        db = await open({
+            filename: DB_PATH,
+            driver: sqlite3.Database,
+            mode: sqlite3.OPEN_READWRITE
+        });
+
+        return db;
     } catch (error) {
-        console.error('Error removing existing database:', error);
+        console.error('Database connection error:', error.message);
+        if (error.code === 'SQLITE_READONLY') {
+            console.error('Error: Unable to write to database file. Please check file permissions.');
+            console.error(`Database path: ${DB_PATH}`);
+            console.error('Try running: chmod 644 temperature_data.sqlite');
+        }
+        throw error;
     }
-
-    console.log('Creating new database...');
-    console.log(`Using MDB file from: ${MDB_FILE_PATH}`);
-    
-    db = await open({
-        filename: dbPath,
-        driver: sqlite3.Database
-    });
-
-    // Create tables if they don't exist
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS temperature_readings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            datetime DATETIME NOT NULL,
-            T1 REAL,
-            T2 REAL,
-            T3 REAL,
-            T4 REAL,
-            T5 REAL,
-            T6 REAL,
-            T7 REAL,
-            T8 REAL,
-            T9 REAL,
-            T10 REAL,
-            T11 REAL,
-            T12 REAL,
-            T13 REAL,
-            T14 REAL,
-            events INTEGER DEFAULT 0
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_datetime ON temperature_readings(datetime);
-    `);
-
-    return db;
 }
 
 // Get readings for a specific date range with pagination
 async function getReadings(startDate, endDate, limit = 1000, offset = 0) {
-    const db = await initializeDatabase();
+    const db = await getDatabase();
     
     const query = `
         SELECT *
@@ -94,7 +118,7 @@ async function getReadings(startDate, endDate, limit = 1000, offset = 0) {
 
 // Get temperature statistics for a date range
 async function getTemperatureStats(startDate, endDate) {
-    const db = await initializeDatabase();
+    const db = await getDatabase();
     
     const stats = await db.get(`
         SELECT 
@@ -144,7 +168,7 @@ async function getTemperatureStats(startDate, endDate) {
 
 // Insert or update readings
 async function insertReadings(readings) {
-    const db = await initializeDatabase();
+    const db = await getDatabase();
     
     const stmt = await db.prepare(`
         INSERT INTO temperature_readings 
@@ -174,7 +198,8 @@ async function insertReadings(readings) {
 }
 
 module.exports = {
-    initializeDatabase,
+    setupDatabase,
+    getDatabase,
     getReadings,
     getTemperatureStats,
     insertReadings

@@ -5,7 +5,7 @@
   "description": "Temperature monitoring dashboard with SQLite backend",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "concurrently \"npm run server\" \"npm run client\"",
     "client": "react-scripts start",
     "server": "nodemon server.js",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
@@ -41,6 +41,7 @@
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "@tailwindcss/forms": "^0.5.7",
     "@tailwindcss/typography": "^0.5.10",
+    "@types/fs-extra": "^11.0.4",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
     "nodemon": "^3.0.3",

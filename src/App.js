@@ -34,22 +34,35 @@ function App() {
       setLoading(true);
       setError(null);
       
+      console.log('fetchData received:', {
+        newOffset,
+        newLimit,
+        newDateRange,
+        dateRange
+      });
+      
       // Ensure we have valid dayjs objects
-      const startDate = dayjs(newDateRange?.[0] || dateRange[0]);
-      const endDate = dayjs(newDateRange?.[1] || dateRange[1]);
+      const startDate = dayjs(newDateRange?.[0]);
+      const endDate = dayjs(newDateRange?.[1]);
+      
+      console.log('Processed dates:', {
+        startDate: startDate.format(),
+        endDate: endDate.format(),
+        isStartValid: startDate.isValid(),
+        isEndValid: endDate.isValid()
+      });
       
       if (!startDate.isValid() || !endDate.isValid()) {
         throw new Error('Invalid date range');
       }
 
       const params = {
-        startDate: startDate.startOf('day').toISOString(),
-        endDate: endDate.endOf('day').toISOString(),
-        limit: newLimit,
+        startDate: startDate.format('YYYY-MM-DD'),
+        endDate: endDate.format('YYYY-MM-DD'),
         offset: newOffset
       };
 
-      console.log('Fetching data with params:', params);
+      console.log('Final API params:', params);
       const response = await axios.get('http://localhost:3001/api/temperature-data', { params });
       console.log('Received response:', response);
 
@@ -59,16 +72,31 @@ function App() {
       }
 
       const responseData = response.data;
+      console.log('Processing response data:', {
+        hasData: Array.isArray(responseData.data),
+        dataLength: responseData.data?.length,
+        total: responseData.total,
+        firstRecord: responseData.data?.[0],
+        stats: responseData.stats
+      });
       
       setData(Array.isArray(responseData.data) ? responseData.data : []);
       setPagination({
-        limit: newLimit,
         offset: newOffset,
         total: responseData.total || 0,
         dateRange: [startDate, endDate]
       });
       setDateRange([startDate, endDate]);
       setTemperatureStats(responseData.stats || null);
+
+      console.log('State updated with:', {
+        dataLength: responseData.data?.length,
+        pagination: {
+          offset: newOffset,
+          total: responseData.total || 0,
+          dateRange: [startDate.format('YYYY-MM-DD'), endDate.format('YYYY-MM-DD')]
+        }
+      });
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(error.response?.data?.message || error.message);
@@ -100,7 +128,12 @@ function App() {
 
   const handlePageChange = async (newOffset, newLimit, newDateRange) => {
     try {
-      await fetchData(newOffset, newLimit, newDateRange);
+      console.log('handlePageChange received:', { newOffset, newLimit, newDateRange });
+      // If newDateRange is an array of strings, convert them to dayjs objects
+      const processedDateRange = Array.isArray(newDateRange) 
+        ? [dayjs(newDateRange[0]), dayjs(newDateRange[1])]
+        : newDateRange;
+      await fetchData(newOffset, newLimit, processedDateRange);
     } catch (error) {
       console.error('Error changing page:', error);
       setSnackbar({
@@ -217,7 +250,7 @@ function App() {
                   data={data || []} 
                   loading={loading}
                   pagination={pagination}
-                  onPageChange={(newPage, newPageSize) => fetchData(newPage, newPageSize)}
+                  onPageChange={handlePageChange}
                   temperatureStats={temperatureStats}
                 />
               } 

@@ -2,18 +2,59 @@ const fs = require('fs');
 const { watch } = require('fs/promises');
 const { join } = require('path');
 const MDBReader = require('mdb-reader');
-const { insertReadings, initializeDatabase } = require('./database');
+const { insertReadings, getDatabase } = require('./database');
 
 // Get MDB file path from environment variable or use default
 const MDB_FILE_PATH = process.env.MDB_FILE_PATH || join(__dirname, 'your-database.mdb');
 
 // Keep track of the last processed record's datetime during runtime
 let lastProcessedDatetime = null;
+let lastFileSize = 0;
+let isProcessing = false;
+let changeTimeout = null;
+
+// Function to get the last processed datetime from the database
+async function getLastProcessedDatetime() {
+    try {
+        const db = await getDatabase();
+        const result = await db.get('SELECT MAX(datetime) as last_datetime FROM temperature_readings');
+        return result?.last_datetime || null;
+    } catch (error) {
+        console.error('Error getting last processed datetime:', error);
+        return null;
+    }
+}
 
 async function processNewRecords() {
+    // Prevent concurrent processing
+    if (isProcessing) {
+        console.log('Already processing records, skipping...');
+        return;
+    }
+
     try {
+        isProcessing = true;
         console.log('Checking for new records...');
         
+        // Get current file size
+        const stats = fs.statSync(MDB_FILE_PATH);
+        const currentSize = stats.size;
+
+        // If file size hasn't changed and we've processed records before, skip
+        if (currentSize === lastFileSize && lastProcessedDatetime) {
+            console.log('File unchanged, skipping processing');
+            return;
+        }
+
+        // Update file size
+        lastFileSize = currentSize;
+        
+        // If lastProcessedDatetime is null, try to get it from the database
+        if (!lastProcessedDatetime) {
+            lastProcessedDatetime = await getLastProcessedDatetime();
+            console.log('Retrieved last processed datetime from database:', lastProcessedDatetime);
+        }
+
         // Read MDB file
         const buffer = fs.readFileSync(MDB_FILE_PATH);
         const reader = new MDBReader(buffer);
@@ -133,6 +174,8 @@ async function processNewRecords() {
     } catch (error) {
         console.error('Error processing records:', error);
         throw error;
+    } finally {
+        isProcessing = false;
     }
 }
 
@@ -141,21 +184,39 @@ async function startSync() {
         console.log('Starting sync service...');
         console.log(`Using MDB file from: ${MDB_FILE_PATH}`);
         
-        // Reset lastProcessedDatetime since we're starting fresh
-        lastProcessedDatetime = null;
+        // Get initial file size
+        const stats = fs.statSync(MDB_FILE_PATH);
+        lastFileSize = stats.size;
         
-        // Process all records on startup (since lastProcessedDatetime is null)
-        await processNewRecords();
+        // Reset lastProcessedDatetime and get it from database
+        lastProcessedDatetime = await getLastProcessedDatetime();
+        
+        // Process all records on startup if no previous processing found
+        if (!lastProcessedDatetime) {
+            await processNewRecords();
+        }
 
-        // Set up file watcher
+        // Set up file watcher with debouncing
         const watcher = watch(MDB_FILE_PATH);
         
         console.log(`Watching for changes to ${MDB_FILE_PATH}...`);
         
         for await (const event of watcher) {
             if (event.eventType === 'change') {
-                console.log('MDB file changed, processing new records...');
-                await processNewRecords();
+                // Clear existing timeout if any
+                if (changeTimeout) {
+                    clearTimeout(changeTimeout);
+                }
+                
+                // Set new timeout to debounce multiple rapid changes
+                changeTimeout = setTimeout(async () => {
+                    console.log('MDB file changed, processing new records...');
+                    try {
+                        await processNewRecords();
+                    } catch (error) {
+                        console.error('Error processing changes:', error);
+                    }
+                }, 1000); // Wait 1 second after last change before processing
             }
         }
     } catch (error) {

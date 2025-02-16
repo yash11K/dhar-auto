@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { join } = require('path');
-const { getReadings, getTemperatureStats, initializeDatabase } = require('./database');
+const { getReadings, getTemperatureStats, getDatabase } = require('./database');
 const { startSync } = require('./sync-service');
 const fs = require('fs-extra');
 const PDFDocument = require('pdfkit');
@@ -25,7 +25,7 @@ app.use(express.json());
 
 // Initialize database connection and start sync service
 Promise.all([
-    initializeDatabase().catch(err => {
+    getDatabase().catch(err => {
         console.error('Failed to initialize database:', err);
         process.exit(1);
     }),
@@ -41,15 +41,58 @@ app.get('/api/temperature-data', async (req, res) => {
         const days = parseInt(req.query.days) || 30; // Default to 30 days if not specified
         const endDate = req.query.endDate || new Date().toISOString();
         const startDate = req.query.startDate || new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-        const limit = parseInt(req.query.limit) || 1000;
+        const limit = parseInt(req.query.limit) || 999999;
         const offset = parseInt(req.query.offset) || 0;
 
         console.log('Received request with params:', { startDate, endDate, days, limit, offset });
 
-        const [data, stats] = await Promise.all([
-            getReadings(startDate, endDate, limit, offset),
-            getTemperatureStats(startDate, endDate)
-        ]);
+        // Check if requesting data for a single day
+        const isSingleDay = dayjs(startDate).isSame(dayjs(endDate), 'day');
+
+        let data, stats;
+        if (isSingleDay) {
+            // If requesting a single day, return all data points
+            [data, stats] = await Promise.all([
+                getReadings(startDate, endDate, limit, offset),
+                getTemperatureStats(startDate, endDate)
+            ]);
+        } else {
+            // For date ranges, aggregate by day
+            const query = `
+                SELECT 
+                    DATE(datetime) as date,
+                    AVG(T1) as T1, AVG(T2) as T2, AVG(T3) as T3, AVG(T4) as T4,
+                    AVG(T5) as T5, AVG(T6) as T6, AVG(T7) as T7, AVG(T8) as T8,
+                    AVG(T9) as T9, AVG(T10) as T10, AVG(T11) as T11, AVG(T12) as T12,
+                    AVG(T13) as T13, AVG(T14) as T14
+                FROM temperature_readings
+                WHERE datetime BETWEEN ? AND ?
+                GROUP BY DATE(datetime)
+                ORDER BY date ASC
+                LIMIT ? OFFSET ?
+            `;
+
+            const db = await getDatabase();
+            const aggregatedData = await db.all(query, [startDate, endDate, limit, offset]);
+            
+            // Format the aggregated data to match the expected structure
+            data = {
+                readings: aggregatedData.map(row => ({
+                    ...row,
+                    datetime: row.date, // Use the date as datetime
+                    // Round temperature values to 2 decimal places
+                    ...Object.keys(row)
+                        .filter(key => key.startsWith('T'))
+                        .reduce((acc, key) => ({
+                            ...acc,
+                            [key]: row[key] ? Number(row[key].toFixed(2)) : null
+                        }), {})
+                })),
+                total: aggregatedData.length
+            };
+
+            stats = await getTemperatureStats(startDate, endDate);
+        }
 
         const response = {
             data: data.readings,

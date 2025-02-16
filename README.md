@@ -4,11 +4,14 @@ A full-stack web application for visualizing and analyzing temperature data from
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
-- npm (comes with Node.js)
+- Node.js (v14 or higher) and npm (comes with Node.js)
+OR
+- Docker and Docker Compose
 - A Microsoft Access Database (.mdb) file containing temperature data
 
 ## Installation
+
+### Using Node.js directly:
 
 1. Clone this repository:
    ```bash
@@ -20,6 +23,26 @@ A full-stack web application for visualizing and analyzing temperature data from
    ```bash
    npm install
    ```
+
+### Using Docker:
+
+1. Clone this repository:
+   ```bash
+   git clone <repository-url>
+   cd mdb-dashboard
+   ```
+
+2. Build the Docker image:
+   ```bash
+   docker build -t mdb-dashboard .
+   ```
+
+3. Run the container:
+   ```bash
+   docker run -p 3001:3001 -v /path/to/your/database.mdb:/app/database.mdb -e MDB_FILE_PATH=/app/database.mdb mdb-dashboard
+   ```
+
+   Replace `/path/to/your/database.mdb` with the actual path to your MDB file on your host system.
 
 ## Configuration
 
