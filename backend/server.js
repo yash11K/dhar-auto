@@ -10,7 +10,7 @@ const XLSX = require('xlsx');
 const dayjs = require('dayjs');
 
 // Configuration
-const MDB_FILE_PATH = process.env.MDB_FILE_PATH || path.join(__dirname, 'your-database.mdb');
+const MDB_FILE_PATH = process.env.MDB_FILE_PATH || path.join(__dirname, 'data/your-database.mdb');
 if (!fs.existsSync(MDB_FILE_PATH)) {
     console.error(`Error: MDB file not found at ${MDB_FILE_PATH}`);
     console.error('Please set the MDB_FILE_PATH environment variable to point to your .mdb file');
@@ -20,7 +20,11 @@ if (!fs.existsSync(MDB_FILE_PATH)) {
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true
+}));
 app.use(express.json());
 
 // Initialize database connection and start sync service
@@ -310,6 +314,7 @@ app.use((err, req, res, next) => {
 
 // Serve static files from the React app in production
 if (process.env.NODE_ENV === 'production') {
+  console.log('Running in production mode');
   app.use(express.static(path.join(__dirname, 'build')));
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'build', 'index.html'));
@@ -317,6 +322,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const PORT = process.env.PORT || 3001;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 // Improved server startup
 const startServer = async () => {

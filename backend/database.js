@@ -4,8 +4,8 @@ const path = require('path');
 const fs = require('fs-extra');
 
 // Get MDB file path from environment variable or use default
-const MDB_FILE_PATH = process.env.MDB_FILE_PATH || path.join(__dirname, 'your-database.mdb');
-const DB_PATH = path.join(__dirname, 'temperature_data.sqlite');
+const MDB_FILE_PATH = process.env.MDB_FILE_PATH || path.join(__dirname, 'data/your-database.mdb');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data/temperature_data.sqlite');
 
 // Validate MDB file existence
 if (!fs.existsSync(MDB_FILE_PATH)) {
